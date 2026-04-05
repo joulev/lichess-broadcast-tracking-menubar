@@ -1,6 +1,6 @@
 # Lichess Broadcast Tracking Menu Bar
 
-A macOS menu bar app that displays live chess game information from [Lichess broadcasts](https://lichess.org/broadcast).
+A macOS menu bar app that displays live chess game information from [Lichess broadcasts](https://lichess.org/broadcast). Watch the FIDE Candidates Tournament, or any chess tournaments, from your menu bar.
 
 <img width="466" height="281" alt="image" src="https://github.com/user-attachments/assets/5a6df5c7-469f-468e-9958-ed4291429fd4" />
 
