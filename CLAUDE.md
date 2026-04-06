@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A macOS menu bar app that displays live chess game info from Lichess broadcasts. Single-file Python application (~490 lines) using rumps for the menu bar UI.
+A macOS menu bar app that displays live chess game info from Lichess broadcasts. Two-file Python application using rumps for the menu bar UI and WebSocket for real-time updates.
 
 ## Commands
 
@@ -26,22 +26,37 @@ No tests or linter configured.
 
 ## Architecture
 
-Everything lives in `lichess_menubar.py`. The app is a single class `LichessMenuBar(rumps.App)`.
+Two modules:
+
+- **`lichess_broadcast.py`** — Reusable broadcast client. Connects via WebSocket (same protocol as the Lichess browser frontend) and maintains `GameState` for every game in a round. No UI dependencies.
+- **`lichess_menubar.py`** — macOS menu bar UI. Subscribes to `BroadcastClient` callbacks and renders `GameState`. No streaming/parsing logic.
 
 ### Threading model
 
 - **Main thread**: rumps event loop + 1-second clock ticker (`_tick`)
-- **Background stream thread**: streams PGN from Lichess, one thread at a time. Graceful cancellation via a generation counter (`_gen`) — when a new stream starts, the old thread detects its generation is stale and exits.
+- **BroadcastClient thread**: WebSocket connection loop with auto-reconnect
+- **Ping thread**: sends WebSocket keepalives every 2.5s
 - **Daemon threads**: short-lived threads for cloud eval fetches (`_fetch_eval`)
-- **`self.lock`**: guards all mutable game state (board, clocks, players, eval)
+- **`self.lock`**: guards all mutable game state in both modules
 
-### Data flow
+### Data flow (lichess_broadcast.py)
 
-1. `_stream_once()` connects to `lichess.org/api/stream/broadcast/round/{rid}.pgn`, buffers lines until a complete PGN game block arrives
-2. `_ingest()` parses the PGN, extracts board state, player info, clocks, and detects new moves (triggers sound)
-3. `_sync_clocks_once()` makes a one-time JSON API call to get precise live clock values on first load
-4. `_fetch_eval()` queries Lichess cloud eval API with the current FEN for top 3 engine lines
-5. `_refresh_title()` builds the menu bar string: `[white_clock] move (eval) [black_clock ⏱think_time]`
+1. `_fetch_initial_state()` fetches round JSON via HTTP to seed all game states
+2. `_connect_ws()` connects to `wss://socket5.lichess.org/study/{roundId}/socket/v6`
+3. WebSocket messages drive state updates:
+   - `addNode` → new move (FEN, UCI, SAN, clock)
+   - `clock` → live clock update with `relayClocks`
+   - `chapters` → full snapshot of all games (FEN, players, clocks, status, thinkTime)
+   - `setTags` → PGN header changes (result, player names)
+   - `reload`/`resync` → refetch everything via HTTP
+4. Callbacks notify the UI: `on_update`, `on_move`, `on_chapters`, `on_game_end`
+
+### Data flow (lichess_menubar.py)
+
+1. Callbacks from `BroadcastClient` update `self._state` and menu labels
+2. `_tick()` decrements the active player's clock every second
+3. `_fetch_eval()` queries Lichess cloud eval API for top 3 engine lines
+4. `_refresh_title()` builds: `[white_clock] move (eval) [black_clock ⏱think_time]`
 
 ### Custom menu rendering
 
@@ -49,6 +64,6 @@ Uses AppKit `NSView`-based menu labels (`_make_menu_label`, `_update_label`) ins
 
 ### Lichess APIs used
 
-- **PGN stream**: `GET /api/stream/broadcast/round/{roundId}.pgn` (NDJSON-style streaming)
-- **Round JSON**: `GET /api/broadcast/-/-/{roundId}` (clock sync)
+- **WebSocket**: `wss://socket5.lichess.org/study/{roundId}/socket/v6` (same as browser)
+- **Round JSON**: `GET /api/broadcast/-/-/{roundId}` (initial state)
 - **Cloud eval**: `GET /api/cloud-eval?fen=...&multiPv=3`

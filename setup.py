@@ -7,11 +7,11 @@ OPTIONS = {
         "CFBundleName": "Lichess Tracker",
         "CFBundleDisplayName": "Lichess Tracker",
         "CFBundleIdentifier": "dev.joulev.lichess-tracker",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "2.0.0",
+        "CFBundleShortVersionString": "2.0",
         "LSUIElement": True,  # hide from Dock (menu-bar-only app)
     },
-    "packages": ["chess", "requests", "certifi", "charset_normalizer", "idna", "urllib3"],
+    "packages": ["chess", "requests", "certifi", "charset_normalizer", "idna", "urllib3", "websockets"],
 }
 
 setup(
