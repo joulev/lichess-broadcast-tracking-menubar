@@ -8,11 +8,12 @@ A macOS menu bar app that displays live chess game information from [Lichess bro
 
 - Live clocks with per-second countdown
 - Current move with move number
-- Engine evaluation from Lichess cloud eval
+- Local Stockfish evaluation (auto-downloaded on first run)
 - Think time for the active player
 - Top 3 engine lines in the dropdown
-- Player names, ratings, and opening name
+- Player names, titles, and ratings
 - Sound notification on new moves
+- View game on Lichess from the menu
 - Paste any broadcast game URL to switch games
 
 ## Menu bar format
@@ -23,7 +24,7 @@ A macOS menu bar app that displays live chess game information from [Lichess bro
 
 ## Setup
 
-Requires Python 3.10+.
+Requires Python 3.10+ and macOS.
 
 ```sh
 git clone https://github.com/joulev/lichess-broadcast-tracking-menubar.git
@@ -47,6 +48,8 @@ Or launch without a URL and paste one via the menu:
 ```sh
 python lichess_menubar.py
 ```
+
+On first run, Stockfish is automatically downloaded (~50 MB) and cached in `~/Library/Caches/lichess-tracker/`.
 
 ### Build as .app
 
