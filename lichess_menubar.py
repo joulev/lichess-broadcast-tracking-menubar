@@ -157,6 +157,10 @@ class LichessMenuBar(rumps.App):
             self._first_move_seen = False
             self._last_eval_fen = None
         self.title = "♟ Loading…"
+        _update_label(self._lbl_eval, self._ctr_eval, "Eval: -")
+        _update_label(self._lbl_pv1, self._ctr_pv1, "  -")
+        _update_label(self._lbl_pv2, self._ctr_pv2, "  -")
+        _update_label(self._lbl_pv3, self._ctr_pv3, "  -")
         self._start_client()
         return True
 
