@@ -97,6 +97,17 @@ def _play_move_sound():
         pass
 
 
+def _play_game_end_sound():
+    """Play a distinct system sound to indicate a game has finished."""
+    try:
+        from AppKit import NSSound
+        sound = NSSound.soundNamed_("Glass")
+        if sound:
+            sound.play()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -193,6 +204,7 @@ class LichessMenuBar(rumps.App):
         client.on_update = self._on_game_update
         client.on_move = self._on_move
         client.on_chapters = self._on_chapters_update
+        client.on_game_end = self._on_game_end
         self._client = client
         client.start()
 
@@ -222,6 +234,12 @@ class LichessMenuBar(rumps.App):
                 self._first_move_seen = True
         # Signal eval worker to process new position
         self._eval_event.set()
+
+    def _on_game_end(self, game_id: str, state: GameState):
+        """Called when a game finishes."""
+        if game_id != self.game_id:
+            return
+        _play_game_end_sound()
 
     def _on_chapters_update(self, games: dict[str, GameState]):
         """Called when the chapter list is updated (all games)."""
