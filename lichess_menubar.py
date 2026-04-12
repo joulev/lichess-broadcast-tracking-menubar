@@ -131,6 +131,7 @@ class LichessMenuBar(rumps.App):
         self.eval_lines: list[str] = []
         self._first_move_seen = False
         self._last_eval_fen = None       # avoid re-fetching same position
+        self._all_games: dict[str, GameState] = {}  # all games in round
 
         # --- eval worker thread -------------------------------------------
         self._eval_event = threading.Event()
@@ -145,7 +146,10 @@ class LichessMenuBar(rumps.App):
         self._mi_pv2, self._lbl_pv2, self._ctr_pv2 = _make_menu_label("  -")
         self._mi_pv3, self._lbl_pv3, self._ctr_pv3 = _make_menu_label("  -")
         self._mi_open = rumps.MenuItem("View on Lichess", callback=self._on_open)
-        self._mi_change = rumps.MenuItem("Change Game…", callback=self._on_change)
+        self._mi_change = rumps.MenuItem("Change Game…")
+        self._mi_paste_url = rumps.MenuItem("Paste Game URL…", callback=self._on_paste_url)
+        self._mi_change["Paste Game URL…"] = self._mi_paste_url
+        self._game_items = []  # prevent GC of dynamic menu items
         self.menu = [
             self._mi_white, self._mi_black, None,
             self._mi_eval, self._mi_pv1, self._mi_pv2, self._mi_pv3, None,
@@ -167,11 +171,13 @@ class LichessMenuBar(rumps.App):
             self.eval_lines = []
             self._first_move_seen = False
             self._last_eval_fen = None
+            self._all_games = {}
         self.title = "♟ Loading…"
         _update_label(self._lbl_eval, self._ctr_eval, "Eval: -")
         _update_label(self._lbl_pv1, self._ctr_pv1, "  -")
         _update_label(self._lbl_pv2, self._ctr_pv2, "  -")
         _update_label(self._lbl_pv3, self._ctr_pv3, "  -")
+        self._rebuild_game_submenu()
         self._start_client()
         return True
 
@@ -180,7 +186,7 @@ class LichessMenuBar(rumps.App):
             import webbrowser
             webbrowser.open(self.game_url)
 
-    def _on_change(self, _):
+    def _on_paste_url(self, _):
         w = rumps.Window(
             "Paste a Lichess broadcast game URL:",
             title="Change Game",
@@ -196,6 +202,35 @@ class LichessMenuBar(rumps.App):
                     "Invalid URL",
                     "Expected format:\nhttps://lichess.org/broadcast/…/roundId/gameId",
                 )
+
+    def _on_select_game(self, game_id):
+        """Switch to a different game in the same round without reconnecting."""
+        if game_id == self.game_id:
+            return
+
+        # Get state from client (outside our lock to avoid deadlock)
+        state = self._client.get_game(game_id) if self._client else None
+
+        with self.lock:
+            self.game_id = game_id
+            self.game_url = f"https://lichess.org/broadcast/-/-/{self.round_id}/{game_id}"
+            self.evaluation = None
+            self.eval_lines = []
+            self._last_eval_fen = None
+            self._first_move_seen = True
+            if state:
+                self._state = state
+
+        _update_label(self._lbl_eval, self._ctr_eval, "Eval: -")
+        _update_label(self._lbl_pv1, self._ctr_pv1, "  -")
+        _update_label(self._lbl_pv2, self._ctr_pv2, "  -")
+        _update_label(self._lbl_pv3, self._ctr_pv3, "  -")
+
+        if state:
+            self._update_menu_labels(state)
+            self._eval_event.set()
+
+        self._rebuild_game_submenu()
 
     # ── Client lifecycle ──────────────────────────────────────────
 
@@ -237,12 +272,17 @@ class LichessMenuBar(rumps.App):
 
     def _on_game_end(self, game_id: str, state: GameState):
         """Called when a game finishes."""
-        if game_id != self.game_id:
-            return
-        _play_game_end_sound()
+        with self.lock:
+            self._all_games[game_id] = state
+        if game_id == self.game_id:
+            _play_game_end_sound()
+        self._rebuild_game_submenu()
 
     def _on_chapters_update(self, games: dict[str, GameState]):
         """Called when the chapter list is updated (all games)."""
+        with self.lock:
+            self._all_games = games
+
         gid = self.game_id
         if gid and gid in games:
             state = games[gid]
@@ -253,6 +293,8 @@ class LichessMenuBar(rumps.App):
             self._update_menu_labels(state)
             # Signal eval worker
             self._eval_event.set()
+
+        self._rebuild_game_submenu()
 
     # ── Clock ticker (main thread, 1 s) ──────────────────────────
 
@@ -285,6 +327,51 @@ class LichessMenuBar(rumps.App):
         bt = f" {state.black.title}" if state.black.title else ""
         _update_label(self._lbl_white, self._ctr_white, f"⬜{wt} {state.white.name}{wr}")
         _update_label(self._lbl_black, self._ctr_black, f"⬛{bt} {state.black.name}{br}")
+
+    # ── Game submenu ─────────────────────────────────────────────
+
+    def _rebuild_game_submenu(self):
+        """Rebuild the game list in the Change Game submenu."""
+        from AppKit import NSMenuItem
+        from PyObjCTools import AppHelper
+
+        with self.lock:
+            games = dict(self._all_games)
+            current_gid = self.game_id
+
+        def _do():
+            ns_sub = self._mi_change._menuitem.submenu()
+            if not ns_sub:
+                return
+
+            # Keep only "Paste Game URL…" (index 0)
+            while ns_sub.numberOfItems() > 1:
+                ns_sub.removeItemAtIndex_(ns_sub.numberOfItems() - 1)
+
+            if not games:
+                self._game_items = []
+                return
+
+            # Add separator
+            ns_sub.addItem_(NSMenuItem.separatorItem())
+
+            # Add a rumps MenuItem for each game
+            items = []
+            for gid, state in games.items():
+                wt = f"{state.white.title} " if state.white.title else ""
+                bt = f"{state.black.title} " if state.black.title else ""
+                label = f"{wt}{state.white.name} — {bt}{state.black.name}"
+                if not state.is_ongoing():
+                    label += f"  {state.status}"
+                mi = rumps.MenuItem(label, callback=lambda _, g=gid: self._on_select_game(g))
+                if gid == current_gid:
+                    mi._menuitem.setState_(1)  # checkmark
+                ns_sub.addItem_(mi._menuitem)
+                items.append(mi)
+
+            self._game_items = items  # prevent GC
+
+        AppHelper.callAfter(_do)
 
     # ── Stockfish eval ───────────────────────────────────────────
 
